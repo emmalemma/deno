@@ -79,6 +79,10 @@ function updateChildren(
   }
 }
 
+interface RequireMap {
+  [key: string]: string | Module;
+}
+
 class Module {
   id: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -89,6 +93,7 @@ class Module {
   children: Module[];
   paths: string[];
   path: string;
+  requireMap: RequireMap;
   constructor(id = "", parent?: Module | null) {
     this.id = id;
     this.exports = {};
@@ -99,6 +104,7 @@ class Module {
     this.children = [];
     this.paths = [];
     this.path = path.dirname(id);
+    this.requireMap = (parent && parent.requireMap) || {} as RequireMap;
   }
   static builtinModules: string[] = [];
   static _extensions: {
@@ -350,6 +356,16 @@ class Module {
   //    object.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   static _load(request: string, parent: Module, isMain: boolean): any {
+    // local override first of all
+    if (Object.prototype.hasOwnProperty.call(parent.requireMap, request)) {
+      let override = parent.requireMap[request];
+      if (override instanceof Module) {
+        return override.exports;
+      } else if (typeof override === "string") {
+        request = override;
+      }
+    }
+
     let relResolveCacheIdentifier: string | undefined;
     if (parent) {
       // Fast path for (lazy loaded) modules in the same directory. The indirect
@@ -520,7 +536,10 @@ class Module {
    * @param filename path or URL to current module
    * @return Require function to import CJS modules
    */
-  static createRequire(filename: string | URL): RequireFunction {
+  static createRequire(
+    filename: string | URL,
+    requireMap?: RequireMap,
+  ): RequireFunction {
     let filepath: string;
     if (
       filename instanceof URL ||
@@ -532,7 +551,7 @@ class Module {
     } else {
       filepath = filename;
     }
-    return createRequireFromPath(filepath);
+    return createRequireFromPath(filepath, requireMap);
   }
 
   static _initPaths(): void {
@@ -932,14 +951,18 @@ function resolveExportsTarget(
       const resolvedTargetPath = resolvedTarget.pathname;
       if (
         resolvedTargetPath.startsWith(pkgPathPath) &&
-        resolvedTargetPath.indexOf("/node_modules/", pkgPathPath.length - 1) ===
+        resolvedTargetPath.indexOf(
+            "/node_modules/",
+            pkgPathPath.length - 1,
+          ) ===
           -1
       ) {
         const resolved = new URL(subpath, resolvedTarget);
         const resolvedPath = resolved.pathname;
         if (
           resolvedPath.startsWith(resolvedTargetPath) &&
-          resolvedPath.indexOf("/node_modules/", pkgPathPath.length - 1) === -1
+          resolvedPath.indexOf("/node_modules/", pkgPathPath.length - 1) ===
+            -1
         ) {
           return fileURLToPath(resolved);
         }
@@ -1094,7 +1117,10 @@ Module._extensions[".json"] = (module: Module, filename: string): void => {
 
 // .node extension is not supported
 
-function createRequireFromPath(filename: string): RequireFunction {
+function createRequireFromPath(
+  filename: string,
+  requireMap?: RequireMap,
+): RequireFunction {
   // Allow a directory to be passed as the filename
   const trailingSlash = filename.endsWith("/") ||
     (isWindows && filename.endsWith("\\"));
@@ -1103,6 +1129,10 @@ function createRequireFromPath(filename: string): RequireFunction {
 
   const m = new Module(proxyPath);
   m.filename = proxyPath;
+
+  if (requireMap) {
+    m.requireMap = requireMap;
+  }
 
   m.paths = Module._nodeModulePaths(m.path);
   return makeRequireFunction(m);
