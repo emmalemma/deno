@@ -12,6 +12,14 @@ export const cwd = Deno.cwd;
 /** https://nodejs.org/api/process.html#process_process_exit_code */
 export const exit = Deno.exit;
 
+/** https://nodejs.org/api/process.html#process_process_nexttick_callback_args **/
+export function nextTick(callback: Function, ...args: any[]): void {
+  queueMicrotask(function () {
+    // queueMicrotask calls with `this` as `undefined`, but process.nextTick callers might expect the nodejs `global` variable
+    callback.apply((globalThis as any)["global"], args);
+  });
+}
+
 /** https://nodejs.org/api/process.html#process_process_pid */
 export const pid = Deno.pid;
 
@@ -36,6 +44,7 @@ export const process = {
   exit,
   pid,
   platform,
+  nextTick,
   version,
   versions,
 
