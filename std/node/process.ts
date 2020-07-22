@@ -62,19 +62,58 @@ export const process = {
   },
 };
 
+// NB: For `env` and `argv` we cannot reuse process.env and process.argv. Those
+// are evaluated at import time and require permissions even if not imported.
+//
+// Instead, we must create proxies that manually delegate the properties and
+// methods of `argv` and `env` at runtime.
+//
+// This minimal implementation can be further refined to allow e.g. argv[1] not
+// to require execPath permission.
+
 /**
  * https://nodejs.org/api/process.html#process_process_argv
  * @example `import { argv } from './std/node/process.ts'; console.log(argv)`
  */
-// Proxy delegates --allow-env and --allow-read to request time, even for exports
-export const argv = new Proxy(process.argv, {});
+export const argv : string[] = new Proxy([], {
+  get(_, index: number): string {
+    return Reflect.get(process.argv, index);
+  },
+  apply(_, key, args): string {
+    return Reflect.get(process.argv, key, args);
+  },
+  has(_, key) {
+    return Reflect.has(process.argv, key);
+  },
+  ownKeys(_) {
+    return Reflect.ownKeys(process.argv);
+  },
+  getOwnPropertyDescriptor(_, key) {
+    return Reflect.getOwnPropertyDescriptor(process.argv, key);
+  },
+}) as string[];
 
 /**
  * https://nodejs.org/api/process.html#process_process_env
  * @example `import { env } from './std/node/process.ts'; console.log(env)`
  */
-// Proxy delegates --allow-env and --allow-read to request time, even for exports
-export const env = new Proxy(process.env, {});
+export const env: { [index: string]: string } = new Proxy({}, {
+  get(_, prop: string): string {
+    return process.env[prop];
+  },
+  apply(_, key, args): string {
+    return Reflect.get(process.env, key, args);
+  },
+  has(_, key) {
+    return Reflect.has(process.env, key);
+  },
+  ownKeys(_) {
+    return Reflect.ownKeys(process.env);
+  },
+  getOwnPropertyDescriptor(_, key) {
+    return Reflect.getOwnPropertyDescriptor(process.env, key);
+  },
+});
 
 // import process from './std/node/process.ts'
 export default process;
