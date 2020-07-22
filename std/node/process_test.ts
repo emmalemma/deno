@@ -109,7 +109,23 @@ Deno.test({
       process.argv[0].match(/[^/\\]*deno[^/\\]*$/),
       "deno included in the file name of argv[0]",
     );
-    // we cannot test for anything else (we see test runner arguments here)
+
+    // process.argv is a getter for a stored arguments array
+    assert(process.argv === process.argv, "process.argv should === itself");
+
+    // argv is a delegating proxy; test that it is properly iterable
+    // (we aren't testing argv values, just that these operations succeed)
+    const clonedArgv = [...argv];
+    assertEquals(argv[0], Deno.execPath());
+    assertEquals(argv.length, Deno.args.length + 1); // plus execPath
+    argv.forEach((arg, index) => assertEquals(arg, clonedArgv[index]));
+    for (let index in argv) {
+      assert(
+        argv.hasOwnProperty(index),
+        "argv.hasOwnProperty should succeed for index " + index,
+      );
+      assertEquals(argv[index], clonedArgv[index]);
+    }
   },
 });
 
@@ -118,5 +134,38 @@ Deno.test({
   fn() {
     assertEquals(typeof process.env.PATH, "string");
     assertEquals(typeof env.PATH, "string");
+
+    // process.env is a getter for a stored Deno.env.toObject()
+    assert(process.env === process.env, "process.env should === itself");
+
+    // `env` is not; it is a delegating proxy
+    assert(
+      env !== process.env,
+      "env proxy should not strictly equal process.env",
+    );
+
+    // according to node documentation, process.env allows set and delete
+    assertEquals(env._very_unlikely_process_env_test_key, undefined);
+
+    env._very_unlikely_process_env_test_key = "test value";
+
+    assertEquals(env._very_unlikely_process_env_test_key, "test value");
+    assertEquals(process.env._very_unlikely_process_env_test_key, "test value");
+
+    delete env._very_unlikely_process_env_test_key;
+
+    assertEquals(env._very_unlikely_process_env_test_key, undefined);
+    assertEquals(process.env._very_unlikely_process_env_test_key, undefined);
+
+    // test that the proxy is properly iterable
+    for (let key in env) {
+      assertEquals(env[key], Deno.env.get(key));
+    }
+    Object.keys(Deno.env.toObject()).forEach((key) => {
+      assert(
+        env.hasOwnProperty(key),
+        "env.hasOwnProperty should succeed for " + key,
+      );
+    });
   },
 });

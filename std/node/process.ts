@@ -35,6 +35,11 @@ export const versions = {
   ...Deno.version,
 };
 
+// Memoize argv and env. See https://nodejs.org/api/process.html#process_process_env
+// Callers may expect to be able to set properties globally within a node instance
+let _argv: string[] | undefined;
+let _env: { [index: string]: string } | undefined;
+
 /** https://nodejs.org/api/process.html#process_process */
 // @deprecated `import { process } from 'process'` for backwards compatibility with old deno versions
 export const process = {
@@ -59,15 +64,15 @@ export const process = {
   /** https://nodejs.org/api/process.html#process_process_argv */
   get argv(): string[] {
     // Getter delegates --allow-env and --allow-read until request
-    // Getter also allows the export Proxy instance to function as intended
-    return [Deno.execPath(), ...Deno.args];
+    _argv = _argv || [Deno.execPath(), ...Deno.args];
+    return _argv;
   },
 
   /** https://nodejs.org/api/process.html#process_process_env */
   get env(): { [index: string]: string } {
     // Getter delegates --allow-env and --allow-read until request
-    // Getter also allows the export Proxy instance to function as intended
-    return Deno.env.toObject();
+    _env = _env || Deno.env.toObject();
+    return _env;
   },
 };
 
@@ -75,21 +80,22 @@ export const process = {
 // are evaluated at import time and require permissions even if not imported.
 //
 // Instead, we must create proxies that manually delegate the properties and
-// methods of `argv` and `env` at runtime.
+// methods of `process.argv` and `process.env` at runtime.
 //
 // This minimal implementation can be further refined to allow e.g. argv[1] not
-// to require execPath permission.
+// to require execPath permission, and then process.env and process.argv could
+// forward to these proxies rather than the reverse.
 
 /**
  * https://nodejs.org/api/process.html#process_process_argv
  * @example `import { argv } from './std/node/process.ts'; console.log(argv)`
  */
-export const argv : string[] = new Proxy([], {
+export const argv: string[] = new Proxy([], {
   get(_, index: number): string {
     return Reflect.get(process.argv, index);
   },
-  apply(_, key, args): string {
-    return Reflect.get(process.argv, key, args);
+  set(_, index, value) {
+    return Reflect.set(process.argv, index, value);
   },
   has(_, key) {
     return Reflect.has(process.argv, key);
@@ -107,11 +113,14 @@ export const argv : string[] = new Proxy([], {
  * @example `import { env } from './std/node/process.ts'; console.log(env)`
  */
 export const env: { [index: string]: string } = new Proxy({}, {
-  get(_, prop: string): string {
-    return process.env[prop];
+  get(_, key: string): string {
+    return Reflect.get(process.env, key);
   },
-  apply(_, key, args): string {
-    return Reflect.get(process.env, key, args);
+  set(_, key, value) {
+    return Reflect.set(process.env, key, value);
+  },
+  deleteProperty(_, key) {
+    return Reflect.deleteProperty(process.env, key);
   },
   has(_, key) {
     return Reflect.has(process.env, key);
