@@ -79,9 +79,7 @@ function updateChildren(
   }
 }
 
-interface RequireMap {
-  [key: string]: string | Module;
-}
+type RequireOverrideFunction = (request: string) => Object | undefined;
 
 class Module {
   id: string;
@@ -93,7 +91,7 @@ class Module {
   children: Module[];
   paths: string[];
   path: string;
-  requireMap: RequireMap;
+  overrideRequire: RequireOverrideFunction | null;
   constructor(id = "", parent?: Module | null) {
     this.id = id;
     this.exports = {};
@@ -104,7 +102,7 @@ class Module {
     this.children = [];
     this.paths = [];
     this.path = path.dirname(id);
-    this.requireMap = (parent && parent.requireMap) || {} as RequireMap;
+    this.overrideRequire = (parent && parent.overrideRequire) || null;
   }
   static builtinModules: string[] = [];
   static _extensions: {
@@ -356,16 +354,6 @@ class Module {
   //    object.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   static _load(request: string, parent: Module, isMain: boolean): any {
-    // local override first of all
-    if (Object.prototype.hasOwnProperty.call(parent.requireMap, request)) {
-      let override = parent.requireMap[request];
-      if (override instanceof Module) {
-        return override.exports;
-      } else if (typeof override === "string") {
-        request = override;
-      }
-    }
-
     let relResolveCacheIdentifier: string | undefined;
     if (parent) {
       // Fast path for (lazy loaded) modules in the same directory. The indirect
@@ -383,6 +371,14 @@ class Module {
           return cachedModule.exports;
         }
         delete relativeResolveCache[relResolveCacheIdentifier];
+      }
+    }
+
+    // override first of all
+    if (typeof parent.overrideRequire === "function") {
+      const override = parent.overrideRequire(request);
+      if (override !== undefined) {
+        return createNativeModule(request, override).exports;
       }
     }
 
@@ -538,7 +534,7 @@ class Module {
    */
   static createRequire(
     filename: string | URL,
-    requireMap?: RequireMap,
+    overrideRequire?: RequireOverrideFunction,
   ): RequireFunction {
     let filepath: string;
     if (
@@ -551,7 +547,7 @@ class Module {
     } else {
       filepath = filename;
     }
-    return createRequireFromPath(filepath, requireMap);
+    return createRequireFromPath(filepath, overrideRequire);
   }
 
   static _initPaths(): void {
@@ -1119,7 +1115,7 @@ Module._extensions[".json"] = (module: Module, filename: string): void => {
 
 function createRequireFromPath(
   filename: string,
-  requireMap?: RequireMap,
+  overrideRequire?: RequireOverrideFunction,
 ): RequireFunction {
   // Allow a directory to be passed as the filename
   const trailingSlash = filename.endsWith("/") ||
@@ -1130,8 +1126,8 @@ function createRequireFromPath(
   const m = new Module(proxyPath);
   m.filename = proxyPath;
 
-  if (requireMap) {
-    m.requireMap = requireMap;
+  if (overrideRequire) {
+    m.overrideRequire = overrideRequire;
   }
 
   m.paths = Module._nodeModulePaths(m.path);
